@@ -23,7 +23,7 @@ object Main extends App {
     val saveToFile = new Subcommand(SaveToFile) {
       descr("Save given source index to a temporary file")
       val source = trailArg[String]("source-url", descr = "E.g. http://localhost:9200/twitter", required = true)
-      val file = trailArg[String]("target-file", descr = "E.g. /tmp/myfile.json (if omitted, one will be created to temp directory)")
+      val file = trailArg[String]("target-file", descr = "E.g. /tmp/myfile.json (if omitted, one will be created to temp directory)", required = false)
     }
   }
 

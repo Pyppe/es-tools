@@ -5,7 +5,7 @@ import java.io.FileWriter
 import java.net.URL
 
 import com.ning.http.client.Response
-import com.typesafe.scalalogging.StrictLogging
+import play.api.libs.json.{JsArray, JsValue, Json}
 
 import scala.annotation.tailrec
 
@@ -20,20 +20,24 @@ object Elasticsearch extends LoggerSupport {
   import dispatch._, Defaults._
   import scala.concurrent.Await
   import scala.concurrent.duration._
-  import scalaz._, Scalaz._
-  import argonaut._, Argonaut._
 
-  private val scrollIdLens = jObjectPL >=> jsonObjectPL("_scroll_id") >=> jStringPL
-  private val totalHitsLens =
-    jObjectPL >=> jsonObjectPL("hits") >=>
-      jObjectPL >=> jsonObjectPL("total") >=> jNumberPL
-  private val hitsArrayLens =
-    jObjectPL >=> jsonObjectPL("hits") >=>
-      jObjectPL >=> jsonObjectPL("hits") >=> jArrayPL
-
-  def reIndex(sourceIndex: String, target: String): Unit = {
-    loggableIndexIterate(sourceIndex, "Re-indexing") { hits: List[Json] =>
-      println(hits.size + ": TODO")
+  def reIndex(sourceIndex: String, targetUrl: String): Unit = {
+    val targetIndex = urlIndex(targetUrl)
+    val targetHost = urlHost(targetUrl)
+    loggableIndexIterate(sourceIndex, s"Re-indexing to $targetIndex") { hits: Seq[JsValue] =>
+      val bulkBodyLines: Seq[JsValue] = hits.flatMap { hit =>
+        val createJson = Json.obj(
+          "_index" -> targetIndex,
+          "_type" -> hit \ "_type",
+          "_id" -> hit \ "_id"
+        )
+        Seq(Json.obj("create" -> createJson), hit \ "_source")
+      }
+      val bulkResponse = {
+        val bulkFuture = postText(s"$targetHost/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
+        Await.result(bulkFuture, 1.minute)
+      }
+      require((bulkResponse \ "errors").as[Boolean] == false, s"Errors occurred: ${bulkResponse \\ "error"}")
     }
   }
 
@@ -41,49 +45,62 @@ object Elasticsearch extends LoggerSupport {
     val fw = new FileWriter(file)
     loggableIndexIterate(sourceIndex, s"Saving to $file") { hits =>
       hits.foreach { hit =>
-        fw.write(hit.nospaces + "\n")
+        fw.write(hit.toString + "\n")
       }
     }
     fw.close()
   }
 
-  private def loggableIndexIterate(sourceIndex: String, action: String)(handleHits: List[Json] => Unit): Unit = {
-    val sourceHost = {
-      val u = new URL(sourceIndex)
-      s"${u.getProtocol}://${u.getAuthority}"
-    }
+  private def urlHost(url: String) = {
+    val u = new URL(url)
+    s"${u.getProtocol}://${u.getAuthority}"
+  }
+
+  private def urlIndex(url: String) = {
+    val u = new URL(url)
+    u.getPath.split('/').filter(_.nonEmpty).head
+  }
+
+  private def loggableIndexIterate(sourceIndex: String, action: String)(handleHits: Seq[JsValue] => Unit): Unit = {
+    val sourceHost = urlHost(sourceIndex)
 
     val bodyJson = Json.obj(
-      "query" -> Json.obj("match_all" -> jEmptyObject),
-      "size" -> jNumber(1000)
+      "query" -> Json.obj("match_all" -> Json.obj()),
+      "size" -> 1000
     )
 
-    val future = Http(url(s"$sourceIndex/_search?search_type=scan&scroll=1m").POST.setBody(bodyJson.nospaces)).map(asJson)
+    val future = postJson(s"$sourceIndex/_search?search_type=scan&scroll=1m", bodyJson)
     val res = Await.result(future, 1.minute)
-    val totalHits = totalHitsLens.get(res).get.toLong
-    val scrollId = scrollIdLens.get(res).get
+    val totalHits = (res \ "hits" \ "total").as[Long]
+    val scrollId = (res \ "_scroll_id").as[String]
 
-    val progress = new ProgressLogger(s"$action $totalHits entries from $sourceIndex", totalHits)
+    val progress = new ProgressLogger(s"$action [total: $totalHits, source: $sourceIndex]", totalHits)
 
     @tailrec
     def iterateScroll(accCount: Long, scrollId: String): Unit = {
       progress.logProgress(accCount)
-      val future = Http(url(s"$sourceHost/_search/scroll?scroll=1m").POST.setBody(scrollId)).map(asJson)
+      val future = postText(s"$sourceHost/_search/scroll?scroll=1m", scrollId)
       val responseJson = Await.result(future, 1.minute)
-      val hits = hitsArrayLens.get(responseJson).get
+      val hits = (responseJson \ "hits" \ "hits").as[JsArray].value
       hits.size match {
         case 0 =>
           () // Done
 
         case hitCount =>
           handleHits(hits)
-          iterateScroll(accCount + hitCount, scrollIdLens.get(responseJson).get)
+          iterateScroll(accCount + hitCount, (responseJson \ "_scroll_id").as[String])
       }
     }
     iterateScroll(0, scrollId)
   }
 
-  private def asJson(r: Response): Json =
-    Parse.parseOption(r.getResponseBody).get
+  private def postJson(u: String, j: JsValue): Future[JsValue] =
+    Http(url(u).setContentType("application/json", "UTF-8").setBody(j.toString).POST).map(asJson)
+
+  private def postText(u: String, t: String): Future[JsValue] =
+    Http(url(u).setContentType("text/plain", "UTF-8").setBody(t).POST).map(asJson)
+
+  private def asJson(r: Response): JsValue =
+    Json.parse(r.getResponseBodyAsBytes)
 
 }

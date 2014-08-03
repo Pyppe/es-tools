@@ -13,19 +13,18 @@ object ESToolsBuild extends Build {
   )
 
   lazy val dependencies = Seq(
-    "net.databinder.dispatch"    %% "dispatch-core"         % "0.11.1",
-    "io.argonaut"                %% "argonaut"              % "6.0.4",
-    "org.rogach"                 %% "scallop"               % "0.9.5",
+    "net.databinder.dispatch"    %% "dispatch-core"         % "0.11.1", // Http
+    "org.rogach"                 %% "scallop"               % "0.9.5",  // Commandline
+    "com.typesafe.play"          %% "play-json"             % "2.3.2",  // Json
+    "com.typesafe.scala-logging" %% "scala-logging"         % "3.0.0",  // Logging
+    "ch.qos.logback"             %  "logback-classic"       % "1.1.2",  // Logging
 
-    // Logging
-    "com.typesafe.scala-logging" %% "scala-logging"         % "3.0.0",
-    "ch.qos.logback"             %  "logback-classic"       % "1.1.2",
-
-    "org.specs2"              %% "specs2"                % "2.3.12" % "test"
+    // Testing:
+    "org.specs2"                 %% "specs2"                % "2.3.12" % "test"
   )
 
   lazy val root = Project(
-    id = "akka-ircbot",
+    id = "es-tools",
     base = file("."),
     settings = buildSettings ++
       Seq(libraryDependencies ++= dependencies) ++ SbtOneJar.oneJarSettings
