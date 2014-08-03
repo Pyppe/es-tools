@@ -12,8 +12,7 @@ object ESToolsBuild extends Build {
     homepage     := Some(url("https://github.com/Pyppe/es-tools")),
     startYear    := Some(2014),
     description  := "Tools for Elasticsearch."
-
-  //offline := true
+    //offline := true
   )
 
   lazy val dependencies = Seq(
@@ -27,11 +26,15 @@ object ESToolsBuild extends Build {
     "org.specs2"                 %% "specs2"                % "2.3.12" % "test"
   )
 
+  lazy val webResolvers = Seq(
+    "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/"
+  )
+
   lazy val root = Project(
     id = "es-tools",
     base = file("."),
     settings = buildSettings ++
-      Seq(libraryDependencies ++= dependencies) ++ SbtOneJar.oneJarSettings
+      Seq(libraryDependencies ++= dependencies, resolvers ++= webResolvers) ++ SbtOneJar.oneJarSettings
   )
 
 }
