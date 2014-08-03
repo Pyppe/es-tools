@@ -5,11 +5,15 @@ import com.github.retronym.SbtOneJar
 object ESToolsBuild extends Build {
 
   lazy val buildSettings = Seq(
-    organization := "fi.pyppe.estools",
-    version      := "0.1",
+    organization := "fi.pyppe",
+    version      := "0.2-SNAPSHOT",
     scalaVersion := "2.11.1",
-    exportJars   := true
-    //offline := true
+    exportJars   := true,
+    homepage     := Some(url("https://github.com/Pyppe/es-tools")),
+    startYear    := Some(2014),
+    description  := "Tools for Elasticsearch."
+
+  //offline := true
   )
 
   lazy val dependencies = Seq(
