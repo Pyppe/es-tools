@@ -6,7 +6,7 @@ object ESToolsBuild extends Build {
 
   lazy val buildSettings = Seq(
     organization := "fi.pyppe.estools",
-    version      := "0.1-SNAPSHOT",
+    version      := "0.1",
     scalaVersion := "2.11.1",
     exportJars   := true
     //offline := true

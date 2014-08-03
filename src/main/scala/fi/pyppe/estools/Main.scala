@@ -6,15 +6,22 @@ import org.rogach.scallop.{ScallopOption, Subcommand, ScallopConf}
 
 object Main extends App {
 
-  val ReIndex = "re-index"
-  val SaveToFile = "save-to-file"
+  private val ReIndex = "re-index"
+  private val SaveToFile = "save-to-file"
+  val Version = getClass.getPackage.getImplementationVersion
+  private val Title = {
+    val title = s"es-tools $Version"
+    val line = "="*title.size
+    Seq(line,title,line).mkString("\n")
+  }
 
   val opts = new ScallopConf(args) {
     banner(
-      """
-        |Some helpful tools for Elasticsearch
-        |
-        |See usage below:""".stripMargin)
+      s"""
+        |$Title
+        |Helpful tools for Elasticsearch.
+        |See https://github.com/Pyppe/es-tools for details
+        |""".stripMargin)
 
     val reIndex = new Subcommand(ReIndex) {
       val source = trailArg[String]("source-url", descr = "E.g. http://localhost:9200/twitter", required = true)
