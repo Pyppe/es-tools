@@ -21,7 +21,7 @@ object Elasticsearch extends LoggerSupport {
   import scala.concurrent.Await
   import scala.concurrent.duration._
 
-  def reIndex(sourceIndex: String, targetUrl: String): Unit = {
+  def reIndex(sourceIndex: String, targetUrl: String, mapSourceDoc: JsValue => JsValue = identity): Unit = {
     val targetIndex = urlIndex(targetUrl)
     val targetHost = urlHost(targetUrl)
     loggableIndexIterate(sourceIndex, s"Re-indexing to $targetIndex") { hits: Seq[JsValue] =>
@@ -31,7 +31,7 @@ object Elasticsearch extends LoggerSupport {
           "_type" -> hit \ "_type",
           "_id" -> hit \ "_id"
         )
-        Seq(Json.obj("create" -> createJson), hit \ "_source")
+        Seq(Json.obj("create" -> createJson), mapSourceDoc(hit \ "_source"))
       }
       val bulkResponse = {
         val bulkFuture = postText(s"$targetHost/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
