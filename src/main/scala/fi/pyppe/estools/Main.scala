@@ -42,5 +42,6 @@ object Main extends App {
       val file = new File(opts.saveToFile.file.get.getOrElse(File.createTempFile("es-tools_", ".json").getAbsolutePath))
       Elasticsearch.saveIndexToFile(opts.saveToFile.source(), file)
   }
+  dispatch.Http.shutdown()
 
 }
