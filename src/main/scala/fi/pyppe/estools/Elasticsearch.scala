@@ -21,16 +21,21 @@ object Elasticsearch extends LoggerSupport {
   import scala.concurrent.Await
   import scala.concurrent.duration._
 
+  private def hitIndexTypeAndId(hit: JsValue, indexOpt: Option[String] = None) = {
+    val index = indexOpt.getOrElse((hit \ "_index").as[String])
+    Json.obj(
+      "_index" -> index,
+      "_type" -> hit \ "_type",
+      "_id" -> hit \ "_id"
+    )
+  }
+
   def reIndex(sourceIndex: String, targetUrl: String, mapSourceDoc: JsValue => JsValue = identity): Unit = {
     val targetIndex = urlIndex(targetUrl)
     val targetHost = urlHost(targetUrl)
     loggableIndexIterate(sourceIndex, s"Re-indexing to $targetIndex") { hits: Seq[JsValue] =>
       val bulkBodyLines: Seq[JsValue] = hits.flatMap { hit =>
-        val createJson = Json.obj(
-          "_index" -> targetIndex,
-          "_type" -> hit \ "_type",
-          "_id" -> hit \ "_id"
-        )
+        val createJson = hitIndexTypeAndId(hit, Some(targetIndex))
         Seq(Json.obj("create" -> createJson), mapSourceDoc(hit \ "_source"))
       }
       val bulkResponse = {
@@ -39,6 +44,34 @@ object Elasticsearch extends LoggerSupport {
       }
       require((bulkResponse \ "errors").as[Boolean] == false, s"Errors occurred: ${bulkResponse \\ "error"}")
     }
+  }
+
+  def updateDocuments(sourceIndex: String, mapSourceDoc: JsValue => JsValue): Unit = {
+    var updateCount = 0
+    loggableIndexIterate(sourceIndex, s"Updating $sourceIndex") { hits: Seq[JsValue] =>
+      val bulkBodyLines = hits.flatMap { hit =>
+        val doc = hit \ "_source"
+        val updatedDoc = mapSourceDoc(doc)
+        if (updatedDoc != doc) {
+          /*
+          println((hit \ "_id").as[String] + " | " + (doc \ "text").as[String])
+          println("OLD: " + doc \ "links")
+          println("NEW: " + updatedDoc \ "links")
+          println("=============")
+          */
+          Seq(Json.obj("index" -> hitIndexTypeAndId(hit)), updatedDoc)
+        } else Nil
+      }
+      if (bulkBodyLines.nonEmpty) {
+        val bulkResponse = {
+          val bulkFuture = postText(s"${urlHost(sourceIndex)}/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
+          Await.result(bulkFuture, 1.minute)
+        }
+        require((bulkResponse \ "errors").as[Boolean] == false, s"Errors occurred: ${bulkResponse \\ "error"}")
+      }
+      updateCount += (bulkBodyLines.size / 2)
+    }
+    logger.info(s"Updated $updateCount documents")
   }
 
   def saveIndexToFile(sourceIndex: String, file: File): Unit = {
