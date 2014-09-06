@@ -8,6 +8,7 @@ object Main extends App {
 
   private val ReIndex = "re-index"
   private val SaveToFile = "save-to-file"
+  private val IndexFromFile = "index-from-file"
   val Version = getClass.getPackage.getImplementationVersion
   private val Title = {
     val title = s"es-tools $Version"
@@ -32,6 +33,12 @@ object Main extends App {
       val source = trailArg[String]("source-url", descr = "E.g. http://localhost:9200/twitter", required = true)
       val file = trailArg[String]("target-file", descr = "E.g. /tmp/myfile.json (if omitted, one will be created to temp directory)", required = false)
     }
+    val indexFromFile = new Subcommand(IndexFromFile) {
+      descr("Index json-rows from a file")
+      val file = trailArg[String]("file", descr = "E.g. /tmp/rows.json (json objects separated by newlines)", required = true)
+      val target = trailArg[String]("target-url", descr = "E.g. http://localhost:9200/twitter/tweet", required = true)
+      val id = trailArg[String](descr = "If set, will user given field as a _id when indexing", required = false)
+    }
   }
 
   args.head match {
@@ -41,6 +48,11 @@ object Main extends App {
     case SaveToFile =>
       val file = new File(opts.saveToFile.file.get.getOrElse(File.createTempFile("es-tools_", ".json").getAbsolutePath))
       Elasticsearch.saveIndexToFile(opts.saveToFile.source(), file)
+
+    case IndexFromFile =>
+      val file = new File(opts.indexFromFile.file())
+      require(file.isFile, s"$file is not an existing file")
+      Elasticsearch.indexFromFile(opts.indexFromFile.target(), file, opts.indexFromFile.id.get)
   }
   dispatch.Http.shutdown()
 

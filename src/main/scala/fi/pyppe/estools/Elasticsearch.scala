@@ -5,9 +5,10 @@ import java.io.FileWriter
 import java.net.URL
 
 import com.ning.http.client.Response
-import play.api.libs.json.{JsArray, JsValue, Json}
+import play.api.libs.json.{JsArray, JsValue, JsUndefined, Json}
 
 import scala.annotation.tailrec
+import scala.io.Source
 
 /**
  * Elasticsearch
@@ -37,6 +38,28 @@ object Elasticsearch extends LoggerSupport {
       val bulkBodyLines: Seq[JsValue] = hits.flatMap { hit =>
         val createJson = hitIndexTypeAndId(hit, Some(targetIndex))
         Seq(Json.obj("create" -> createJson), mapSourceDoc(hit \ "_source"))
+      }
+      val bulkResponse = {
+        val bulkFuture = postText(s"$targetHost/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
+        Await.result(bulkFuture, 1.minute)
+      }
+      require((bulkResponse \ "errors").as[Boolean] == false, s"Errors occurred: ${bulkResponse \\ "error"}")
+    }
+  }
+
+  def indexFromFile(targetUrl: String, file: File, idField: Option[String]): Unit = {
+    require(file.isFile)
+    val targetIndex = urlIndex(targetUrl)
+    val targetHost = urlHost(targetUrl)
+    val targetType = urlIndexType(targetUrl)
+    Source.fromFile(file).getLines.grouped(1000).foreach { batch =>
+      val bulkBodyLines = batch.flatMap { line =>
+        val doc = Json.parse(line)
+        val createJson = Json.obj(
+          "_index" -> targetIndex,
+          "_type" -> targetType
+        ) ++ idField.map(id => Json.obj("_id" -> doc \ id)).getOrElse(Json.obj())
+        Seq(Json.obj("create" -> createJson), doc)
       }
       val bulkResponse = {
         val bulkFuture = postText(s"$targetHost/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
@@ -92,6 +115,11 @@ object Elasticsearch extends LoggerSupport {
   private def urlIndex(url: String) = {
     val u = new URL(url)
     u.getPath.split('/').filter(_.nonEmpty).head
+  }
+
+  private def urlIndexType(url: String) = {
+    val u = new URL(url)
+    u.getPath.split('/').filter(_.nonEmpty)(1)
   }
 
   private def loggableIndexIterate(sourceIndex: String, action: String)(handleHits: Seq[JsValue] => Unit): Unit = {
