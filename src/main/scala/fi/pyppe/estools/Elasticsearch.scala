@@ -37,7 +37,7 @@ object Elasticsearch extends LoggerSupport {
     loggableIndexIterate(sourceIndex, s"Re-indexing to $targetIndex") { hits: Seq[JsValue] =>
       val bulkBodyLines: Seq[JsValue] = hits.flatMap { hit =>
         val createJson = hitIndexTypeAndId(hit, Some(targetIndex))
-        Seq(Json.obj("create" -> createJson), mapSourceDoc(hit \ "_source"))
+        Seq(Json.obj("index" -> createJson), mapSourceDoc(hit \ "_source"))
       }
       val bulkResponse = {
         val bulkFuture = postText(s"$targetHost/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
