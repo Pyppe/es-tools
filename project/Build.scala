@@ -7,7 +7,7 @@ object ESToolsBuild extends Build {
   lazy val buildSettings = Seq(
     organization := "fi.pyppe",
     version      := "0.2-SNAPSHOT",
-    scalaVersion := "2.11.1",
+    scalaVersion := "2.11.6",
     exportJars   := true,
     homepage     := Some(url("https://github.com/Pyppe/es-tools")),
     startYear    := Some(2014),
