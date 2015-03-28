@@ -5,10 +5,11 @@ import java.io.FileWriter
 import java.net.URL
 
 import com.ning.http.client.Response
-import play.api.libs.json.{JsArray, JsValue, JsUndefined, Json}
+import play.api.libs.json._
 
 import scala.annotation.tailrec
 import scala.io.Source
+import scala.util.Try
 
 /**
  * Elasticsearch
@@ -31,10 +32,13 @@ object Elasticsearch extends LoggerSupport {
     )
   }
 
-  def reIndex(sourceIndex: String, targetUrl: String, mapSourceDoc: JsValue => JsValue = identity): Unit = {
+  def reIndex(sourceUrl: String,
+              targetUrl: String,
+              query: Option[JsObject] = None,
+              mapSourceDoc: JsValue => JsValue = identity): Unit = {
     val targetIndex = urlIndex(targetUrl)
     val targetHost = urlHost(targetUrl)
-    loggableIndexIterate(sourceIndex, s"Re-indexing to $targetIndex") { hits: Seq[JsValue] =>
+    loggableIndexIterate(sourceUrl, s"Re-indexing to $targetIndex", query) { hits: Seq[JsValue] =>
       val bulkBodyLines: Seq[JsValue] = hits.flatMap { hit =>
         val createJson = hitIndexTypeAndId(hit, Some(targetIndex))
         Seq(Json.obj("index" -> createJson), mapSourceDoc(hit \ "_source"))
@@ -69,9 +73,9 @@ object Elasticsearch extends LoggerSupport {
     }
   }
 
-  def updateDocuments(sourceIndex: String, mapSourceDoc: JsValue => JsValue): Unit = {
+  def updateDocuments(sourceUrl: String, mapSourceDoc: JsValue => JsValue): Unit = {
     var updateCount = 0
-    loggableIndexIterate(sourceIndex, s"Updating $sourceIndex") { hits: Seq[JsValue] =>
+    loggableIndexIterate(sourceUrl, s"Updating $sourceUrl", None) { hits: Seq[JsValue] =>
       val bulkBodyLines = hits.flatMap { hit =>
         val doc = hit \ "_source"
         val updatedDoc = mapSourceDoc(doc)
@@ -87,7 +91,7 @@ object Elasticsearch extends LoggerSupport {
       }
       if (bulkBodyLines.nonEmpty) {
         val bulkResponse = {
-          val bulkFuture = postText(s"${urlHost(sourceIndex)}/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
+          val bulkFuture = postText(s"${urlHost(sourceUrl)}/_bulk", bulkBodyLines.mkString("", "\n", "\n"))
           Await.result(bulkFuture, 1.minute)
         }
         require((bulkResponse \ "errors").as[Boolean] == false, s"Errors occurred: ${bulkResponse \\ "error"}")
@@ -97,9 +101,9 @@ object Elasticsearch extends LoggerSupport {
     logger.info(s"Updated $updateCount documents")
   }
 
-  def saveIndexToFile(sourceIndex: String, file: File): Unit = {
+  def saveIndexToFile(sourceIndex: String, file: File, query: Option[JsObject]): Unit = {
     val fw = new FileWriter(file)
-    loggableIndexIterate(sourceIndex, s"Saving to $file") { hits =>
+    loggableIndexIterate(sourceIndex, s"Saving to $file", query) { hits =>
       hits.foreach { hit =>
         fw.write(hit.toString + "\n")
       }
@@ -122,20 +126,20 @@ object Elasticsearch extends LoggerSupport {
     u.getPath.split('/').filter(_.nonEmpty)(1)
   }
 
-  private def loggableIndexIterate(sourceIndex: String, action: String)(handleHits: Seq[JsValue] => Unit): Unit = {
-    val sourceHost = urlHost(sourceIndex)
-
+  private def loggableIndexIterate(sourceUrl: String, action: String, query: Option[JsObject])(handleHits: Seq[JsValue] => Unit): Unit = {
+    val queryJs = query.getOrElse(Json.obj("match_all" -> Json.obj()))
     val bodyJson = Json.obj(
-      "query" -> Json.obj("match_all" -> Json.obj()),
+      "query" -> queryJs,
       "size" -> 1000
     )
+    val sourceHost = urlHost(sourceUrl)
 
-    val future = postJson(s"$sourceIndex/_search?search_type=scan&scroll=1m", bodyJson)
+    val future = postJson(s"$sourceUrl/_search?search_type=scan&scroll=1m", bodyJson)
     val res = Await.result(future, 1.minute)
     val totalHits = (res \ "hits" \ "total").as[Long]
     val scrollId = (res \ "_scroll_id").as[String]
 
-    val progress = new ProgressLogger(s"$action [total: $totalHits, source: $sourceIndex]", totalHits)
+    val progress = new ProgressLogger(s"$action [total: $totalHits, source: $sourceUrl]", totalHits)
 
     @tailrec
     def iterateScroll(accCount: Long, scrollId: String): Unit = {
@@ -155,13 +159,16 @@ object Elasticsearch extends LoggerSupport {
     iterateScroll(0, scrollId)
   }
 
-  private def postJson(u: String, j: JsValue): Future[JsValue] =
+  private def postJson(u: String, j: JsValue): Future[JsValue] = {
     Http(url(u).setContentType("application/json", "UTF-8").setBody(j.toString).POST).map(asJson)
+  }
 
   private def postText(u: String, t: String): Future[JsValue] =
     Http(url(u).setContentType("text/plain", "UTF-8").setBody(t).POST).map(asJson)
 
   private def asJson(r: Response): JsValue =
-    Json.parse(r.getResponseBodyAsBytes)
+    Try(Json.parse(r.getResponseBodyAsBytes)).getOrElse {
+      throw new Exception(s"Invalid response from ${r.getUri}: ${r.getResponseBody}")
+    }
 
 }
